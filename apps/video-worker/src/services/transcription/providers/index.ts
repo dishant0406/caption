@@ -2,21 +2,24 @@
  * Transcription Provider Factory
  * 
  * Creates and manages transcription provider instances.
- * Allows easy switching between providers via configuration.
+ * Supports multiple providers:
+ * - Azure OpenAI Whisper: For segment-level transcription
+ * - Fal.ai Whisper: For word-level transcription (more accurate word timestamps)
  */
 
 import { getEnv } from '@/config';
 import { logger } from '@/plugins/logger';
 
 import { AzureOpenAIConfig, AzureOpenAIWhisperProvider } from './azure-openai.provider';
+import { FalWhisperConfig, FalWhisperProvider } from './fal-whisper.provider';
 import { ITranscriptionProvider } from './types';
 
-export { AzureGPT4oTranscriptionProvider } from './azure-gpt4o.provider';
 export { AzureOpenAIWhisperProvider } from './azure-openai.provider';
+export { FalWhisperProvider } from './fal-whisper.provider';
 export * from './types';
 
 // Provider type enum
-export type TranscriptionProviderType = 'azure-openai' | 'azure-gpt4o' | 'openai' | 'deepgram' | 'assemblyai';
+export type TranscriptionProviderType = 'azure-openai' | 'fal-whisper';
 
 // Factory configuration
 export interface TranscriptionFactoryConfig {
@@ -26,17 +29,8 @@ export interface TranscriptionFactoryConfig {
   // Azure OpenAI config
   azureOpenAI?: AzureOpenAIConfig;
   
-  // OpenAI config (for future use)
-  openAI?: {
-    apiKey: string;
-    model?: string;
-  };
-  
-  // Deepgram config (for future use)
-  deepgram?: {
-    apiKey: string;
-    model?: string;
-  };
+  // Fal.ai config
+  falWhisper?: FalWhisperConfig;
 }
 
 /**
@@ -47,7 +41,7 @@ class TranscriptionProviderFactory {
   private static instance: TranscriptionProviderFactory;
   private providers: Map<string, ITranscriptionProvider> = new Map();
   private activeProvider: ITranscriptionProvider | null = null;
-  private fallbackProvider: ITranscriptionProvider | null = null;
+  private wordLevelProvider: ITranscriptionProvider | null = null;
 
   private constructor() {}
 
@@ -64,26 +58,41 @@ class TranscriptionProviderFactory {
   initializeFromEnv(): void {
     const env = getEnv();
 
-    // Determine which provider to use from env
+    // Determine which provider to use for segment-level transcription
     const providerType = (env.TRANSCRIPTION_PROVIDER || 'azure-openai') as TranscriptionProviderType;
+    
+    // Determine which provider to use for word-level transcription
+    const wordProviderType = (env.WORD_TRANSCRIPTION_PROVIDER || 'fal-whisper') as TranscriptionProviderType;
 
-    logger.info('Initializing transcription provider', { provider: providerType });
+    logger.info('Initializing transcription providers', { 
+      segmentProvider: providerType,
+      wordProvider: wordProviderType,
+    });
 
-    switch (providerType) {
-      case 'azure-openai':
-        this.initializeAzureOpenAI(env);
-        break;
-      case 'azure-gpt4o':
-        this.initializeAzureGPT4o(env);
-        break;
-      case 'openai':
-        // Future: OpenAI direct implementation
-        logger.warn('OpenAI direct provider not yet implemented, falling back to Azure OpenAI');
-        this.initializeAzureOpenAI(env);
-        break;
-      default:
-        logger.warn(`Unknown provider type: ${providerType}, using Azure OpenAI`);
-        this.initializeAzureOpenAI(env);
+    // Initialize Azure OpenAI if needed
+    if (providerType === 'azure-openai' || wordProviderType === 'azure-openai') {
+      this.initializeAzureOpenAI(env);
+    }
+
+    // Initialize Fal.ai Whisper if needed
+    if (providerType === 'fal-whisper' || wordProviderType === 'fal-whisper') {
+      this.initializeFalWhisper(env);
+    }
+
+    // Set active providers
+    this.activeProvider = this.providers.get(providerType) || null;
+    this.wordLevelProvider = this.providers.get(wordProviderType) || null;
+
+    // Fallback: if word-level provider not available, use segment provider
+    if (!this.wordLevelProvider && this.activeProvider) {
+      logger.warn('Word-level provider not available, falling back to segment provider');
+      this.wordLevelProvider = this.activeProvider;
+    }
+
+    // Fallback: if segment provider not available, use word provider
+    if (!this.activeProvider && this.wordLevelProvider) {
+      logger.warn('Segment provider not available, falling back to word provider');
+      this.activeProvider = this.wordLevelProvider;
     }
   }
 
@@ -102,7 +111,6 @@ class TranscriptionProviderFactory {
     
     if (provider.isConfigured()) {
       this.providers.set('azure-openai', provider);
-      this.activeProvider = provider;
       logger.info('Azure OpenAI Whisper provider initialized successfully');
     } else {
       logger.error('Azure OpenAI Whisper provider configuration incomplete', {
@@ -114,42 +122,47 @@ class TranscriptionProviderFactory {
   }
 
   /**
-   * Initialize Azure GPT-4o Transcription provider
+   * Initialize Fal.ai Whisper provider
    */
-  private initializeAzureGPT4o(env: ReturnType<typeof getEnv>): void {
-    // Dynamic import to avoid unused import being removed by formatter
-    const { AzureGPT4oTranscriptionProvider } = require('./azure-gpt4o.provider');
-    
-    const gpt4oConfig = {
-      endpoint: env.AZURE_GPT4O_ENDPOINT || env.AZURE_OPENAI_ENDPOINT || '',
-      apiKey: env.AZURE_GPT4O_API_KEY || env.AZURE_OPENAI_API_KEY || '',
-      deploymentName: env.AZURE_GPT4O_DEPLOYMENT || 'gpt-4o-transcribe-diarize',
-      apiVersion: env.AZURE_GPT4O_API_VERSION || '2025-03-01-preview',
+  private initializeFalWhisper(env: ReturnType<typeof getEnv>): void {
+    const falConfig: FalWhisperConfig = {
+      apiKey: env.FAL_KEY || '',
+      chunkLevel: 'word', // Default to word-level for accurate timestamps
+      pollIntervalMs: env.FAL_POLL_INTERVAL_MS || 3000, // Configurable poll interval
     };
 
-    const provider = new AzureGPT4oTranscriptionProvider(gpt4oConfig);
+    const provider = new FalWhisperProvider(falConfig);
     
     if (provider.isConfigured()) {
-      this.providers.set('azure-gpt4o', provider);
-      this.activeProvider = provider;
-      logger.info('Azure GPT-4o Transcription provider initialized successfully');
+      this.providers.set('fal-whisper', provider);
+      logger.info('Fal.ai Whisper provider initialized successfully', {
+        pollIntervalMs: falConfig.pollIntervalMs,
+      });
     } else {
-      logger.error('Azure GPT-4o Transcription provider configuration incomplete', {
-        hasEndpoint: !!gpt4oConfig.endpoint,
-        hasApiKey: !!gpt4oConfig.apiKey,
-        hasDeployment: !!gpt4oConfig.deploymentName,
+      logger.error('Fal.ai Whisper provider configuration incomplete', {
+        hasApiKey: !!falConfig.apiKey,
       });
     }
   }
 
   /**
-   * Get the active provider
+   * Get the active provider (for segment-level transcription)
    */
   getProvider(): ITranscriptionProvider {
     if (!this.activeProvider) {
       throw new Error('No transcription provider configured. Call initializeFromEnv() first.');
     }
     return this.activeProvider;
+  }
+
+  /**
+   * Get the word-level provider (for word-by-word captions)
+   */
+  getWordLevelProvider(): ITranscriptionProvider {
+    if (!this.wordLevelProvider) {
+      throw new Error('No word-level transcription provider configured. Call initializeFromEnv() first.');
+    }
+    return this.wordLevelProvider;
   }
 
   /**
@@ -210,9 +223,14 @@ class TranscriptionProviderFactory {
 // Export singleton instance getter
 export const getTranscriptionFactory = TranscriptionProviderFactory.getInstance.bind(TranscriptionProviderFactory);
 
-// Convenience function to get the active provider
+// Convenience function to get the active provider (segment-level)
 export function getTranscriptionProvider(): ITranscriptionProvider {
   return TranscriptionProviderFactory.getInstance().getProvider();
+}
+
+// Convenience function to get the word-level provider
+export function getWordLevelTranscriptionProvider(): ITranscriptionProvider {
+  return TranscriptionProviderFactory.getInstance().getWordLevelProvider();
 }
 
 // Initialize providers from environment

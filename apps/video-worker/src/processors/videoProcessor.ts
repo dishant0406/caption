@@ -304,35 +304,123 @@ export async function processGeneratePreview(payload: GeneratePreviewJobPayload)
       chunkStartTime = Math.min(...transcript.map(seg => seg.start));
     }
 
-    logger.info('Converting absolute timestamps to relative', {
-      chunkIndex,
-      chunkStartTime,
-      segmentCount: transcript.length,
-      firstSegmentAbsolute: transcript[0]?.start,
-      lastSegmentAbsolute: transcript[transcript.length - 1]?.end,
-    });
+    let segments: TranscriptionSegment[];
 
-    // Convert TranscriptSegment to TranscriptionSegment with RELATIVE timestamps
-    const segments: TranscriptionSegment[] = transcript.map(seg => ({
-      start: seg.start - chunkStartTime, // Convert to relative (chunk starts at 0)
-      end: seg.end - chunkStartTime,
-      text: seg.text,
-    }));
+    // For word mode, check if transcript is already word-level (corrected/edited)
+    // or if we need to re-transcribe to get word-level timestamps
+    if (captionMode === 'word') {
+      logger.info('Word mode detected', { chunkIndex, captionMode, transcriptSegments: transcript.length });
+      
+      // Check if transcript is already word-level:
+      // - Word-level transcripts have many segments with 1-3 words each
+      // - Sentence-level transcripts have fewer segments with longer text
+      const avgWordsPerSegment = transcript.length > 0
+        ? transcript.reduce((sum, seg) => sum + seg.text.trim().split(/\s+/).length, 0) / transcript.length
+        : 0;
+      
+      const isAlreadyWordLevel = avgWordsPerSegment <= 3 && transcript.length > 5;
+      
+      logger.info('Transcript analysis for word mode', {
+        chunkIndex,
+        avgWordsPerSegment: avgWordsPerSegment.toFixed(2),
+        segmentCount: transcript.length,
+        isAlreadyWordLevel,
+      });
 
-    logger.info('Converted timestamps', {
+      if (isAlreadyWordLevel) {
+        // Transcript is already word-level (was corrected/edited)
+        // Use it directly without re-transcribing
+        logger.info('Using provided word-level transcript (edited/corrected)', { 
+          chunkIndex, 
+          segmentCount: transcript.length,
+          firstWord: transcript[0]?.text,
+        });
+        
+        segments = transcript.map(seg => ({
+          start: seg.start - chunkStartTime,
+          end: seg.end - chunkStartTime,
+          text: seg.text,
+        }));
+      } else {
+        // Transcript is sentence-level, need to transcribe for word-level timestamps
+        logger.info('Transcript is sentence-level, using fal-whisper for word-level', { chunkIndex });
+        
+        // Extract audio for word-level transcription
+        const audioPath = await ffmpegService.extractAudio(chunkPath, tempDir);
+        
+        // Upload audio to blob storage to get URL for fal.ai
+        const audioFileName = path.basename(audioPath);
+        const audioBlobName = `sessions/${sessionId}/audio/chunk_${chunkIndex}_${audioFileName}`;
+        await storage.uploadFromFile(audioPath, audioBlobName, 'audio/mpeg');
+        const audioUrl = storage.getBlobUrl(audioBlobName);
+        
+        // Use fal-whisper provider for word-level transcription
+        const { getTranscriptionFactory } = await import('@/services/transcription/providers');
+        const factory = getTranscriptionFactory();
+        const falProvider = factory.getAvailableProviders().includes('fal-whisper')
+          ? factory.getProviderByName('fal-whisper')
+          : null;
+        
+        if (falProvider && falProvider.isConfigured()) {
+          logger.info('Using fal-whisper for word-level transcription', { chunkIndex, audioUrl });
+          const wordTranscription = await falProvider.transcribe(audioUrl, { timestampGranularity: 'word' });
+          
+          // Use word-level segments directly (already relative timestamps)
+          segments = wordTranscription.segments.map(seg => ({
+            start: seg.start,
+            end: seg.end,
+            text: seg.text,
+          }));
+          
+          logger.info('Fal-whisper word-level transcription completed', {
+            chunkIndex,
+            segmentCount: segments.length,
+            firstWord: segments[0]?.text,
+            lastWord: segments[segments.length - 1]?.text,
+          });
+        } else {
+          // Fallback: Use existing transcript segments (sentence-level)
+          logger.warn('Fal-whisper not available, using sentence-level transcript for word mode', { chunkIndex });
+          segments = transcript.map(seg => ({
+            start: seg.start - chunkStartTime,
+            end: seg.end - chunkStartTime,
+            text: seg.text,
+          }));
+        }
+      }
+    } else {
+      // Sentence mode: Use existing transcript
+      logger.info('Converting absolute timestamps to relative', {
+        chunkIndex,
+        chunkStartTime,
+        segmentCount: transcript.length,
+        firstSegmentAbsolute: transcript[0]?.start,
+        lastSegmentAbsolute: transcript[transcript.length - 1]?.end,
+      });
+
+      // Convert TranscriptSegment to TranscriptionSegment with RELATIVE timestamps
+      segments = transcript.map(seg => ({
+        start: seg.start - chunkStartTime,
+        end: seg.end - chunkStartTime,
+        text: seg.text,
+      }));
+    }
+
+    logger.info('Segments prepared for rendering', {
       chunkIndex,
+      captionMode,
+      segmentCount: segments.length,
       firstSegmentRelative: segments[0]?.start,
       lastSegmentRelative: segments[segments.length - 1]?.end,
     });
 
     // Generate ASS subtitle file
-    // Pass captionMode to generate word-by-word or sentence captions
     const assContent = ffmpegService.generateAssSubtitle(
       segments,
       style,
       metadata.width,
       metadata.height,
-      captionMode || 'sentence' // Default to sentence mode if not specified
+      captionMode || 'sentence'
     );
     const assPath = path.join(tempDir, 'captions.ass');
     fs.writeFileSync(assPath, assContent);
@@ -351,6 +439,24 @@ export async function processGeneratePreview(payload: GeneratePreviewJobPayload)
     const thumbnailBlobName = `sessions/${sessionId}/thumbnails/chunk_${chunkIndex}_${styleId}.jpg`;
     await storage.uploadFromFile(thumbnailPath, thumbnailBlobName, 'image/jpeg');
 
+    // Convert RELATIVE segments back to ABSOLUTE timestamps for DB storage
+    // This ensures the final render uses the correct timestamps
+    const absoluteTranscript: TranscriptSegment[] = segments.map((seg, idx) => ({
+      id: idx,
+      start: seg.start + chunkStartTime,
+      end: seg.end + chunkStartTime,
+      text: seg.text,
+    }));
+
+    logger.info('Preview generated with transcript', {
+      chunkIndex,
+      captionMode,
+      segmentCount: absoluteTranscript.length,
+      chunkStartTime,
+      firstSegmentAbsolute: absoluteTranscript[0]?.start,
+      lastSegmentAbsolute: absoluteTranscript[absoluteTranscript.length - 1]?.end,
+    });
+
     return {
       jobId,
       jobType: 'GENERATE_PREVIEW',
@@ -361,6 +467,9 @@ export async function processGeneratePreview(payload: GeneratePreviewJobPayload)
         chunkId,
         previewUrl: storage.getBlobUrl(previewBlobName),
         thumbnailUrl: storage.getBlobUrl(thumbnailBlobName),
+        // Include transcript with ABSOLUTE timestamps so it can be saved to DB
+        // This preserves word-level timing and corrections for final render
+        transcript: absoluteTranscript,
       },
     };
   } catch (error) {

@@ -609,7 +609,7 @@ export const correctTranscriptionTool = createTool({
   id: IntentType.CORRECT_TRANSCRIPTION,
   description: INTENT_METADATA[IntentType.CORRECT_TRANSCRIPTION].description,
   inputSchema: z.object({
-    correctedText: z.string().describe('The corrected transcription text from user'),
+    correctionRequest: z.string().describe('The user correction request - could be a word fix like "its Dishant not Dishan" or the full corrected text'),
     userPhone: z.string().describe('User phone number'),
     sessionId: z.string().describe('Current session ID'),
   }),
@@ -618,11 +618,11 @@ export const correctTranscriptionTool = createTool({
     jobQueued: z.boolean().optional(),
   }),
   execute: async ({ context }) => {
-    const { correctedText, userPhone, sessionId } = context;
+    const { correctionRequest, userPhone, sessionId } = context;
 
     logger.info('[TOOL CALLED] correctTranscriptionTool', {
       toolId: IntentType.CORRECT_TRANSCRIPTION,
-      input: { correctedText: correctedText.substring(0, 50) + '...', userPhone, sessionId },
+      input: { correctionRequest: correctionRequest.substring(0, 100), userPhone, sessionId },
     });
 
     try {
@@ -659,26 +659,113 @@ export const correctTranscriptionTool = createTool({
         };
       }
 
-      // Get the total time span from the original transcript
+      // Get the original text from transcript
+      const originalText = originalTranscript.map(seg => seg.text).join(' ').trim();
+
+      // Use LLM to intelligently apply the correction
+      logger.info('[correctTranscriptionTool] Using LLM to apply correction', {
+        originalTextLength: originalText.length,
+        correctionRequest,
+      });
+
+      let correctedText: string | undefined;
+      try {
+        // Get Azure credentials from environment
+        const envModule = await import('@/config/env');
+        const endpoint = envModule.env.AZURE_OPENAI_ENDPOINT;
+        const apiKey = envModule.env.AZURE_OPENAI_API_KEY;
+        const deployment = envModule.env.AZURE_OPENAI_DEPLOYMENT;
+        
+        if (!endpoint || !apiKey || !deployment) {
+          logger.error('[correctTranscriptionTool] Azure OpenAI not configured');
+          return { message: '❌ AI service not configured. Please contact support.' };
+        }
+
+        // Build Azure OpenAI API URL
+        const apiUrl = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2024-02-15-preview`;
+        
+        logger.info('[correctTranscriptionTool] Calling Azure OpenAI for intelligent correction');
+
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': apiKey,
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: 'system',
+                content: `You are a transcript correction assistant. The user will give you:
+1. An original transcript text
+2. A correction request (which could be a word replacement like "its X not Y", or specific text corrections)
+
+Your job is to:
+1. Understand what correction the user wants
+2. Apply the correction to the original transcript
+3. Return ONLY the corrected full transcript text, nothing else
+
+Keep the same meaning, flow, and all other words. Only change what the user specifically asked to fix.
+
+Examples:
+- If user says "its Dishant not Dishan" and original has "Dishan", replace "Dishan" with "Dishant"
+- If user says "change hello to hi", replace "hello" with "hi"
+- If user provides full corrected text, use that directly`,
+              },
+              {
+                role: 'user',
+                content: `Original transcript:\n"${originalText}"\n\nCorrection request:\n"${correctionRequest}"\n\nProvide the corrected full transcript:`,
+              },
+            ],
+            max_tokens: 2000,
+            temperature: 0.1, // Low temperature for accurate corrections
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          logger.error('[correctTranscriptionTool] Azure API error: ' + response.status + ' - ' + errorText);
+          return { message: '❌ Failed to correct transcript. AI service error. Please try again.' };
+        }
+
+        const data = await response.json() as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        
+        correctedText = data.choices?.[0]?.message?.content?.trim();
+        logger.info('[correctTranscriptionTool] LLM correction received', {
+          originalLength: originalText.length,
+          correctedLength: correctedText?.length || 0,
+        });
+      } catch (llmError) {
+        logger.error('[correctTranscriptionTool] LLM call failed', llmError instanceof Error ? llmError : new Error(String(llmError)));
+        return { message: '❌ Failed to correct transcript. AI service error. Please try again.' };
+      }
+
+      if (!correctedText) {
+        logger.warn('[correctTranscriptionTool] LLM returned empty text');
+        return { message: '❌ Failed to correct transcript. Please try again.' };
+      }
+
+      // Get timing info from original transcript
       const firstSegment = originalTranscript[0];
       const lastSegment = originalTranscript[originalTranscript.length - 1];
       const startTime = firstSegment?.start ?? 0;
       const endTime = lastSegment?.end ?? (chunk.endTime - chunk.startTime);
       const totalDuration = endTime - startTime;
 
-      // Split the corrected text into words
-      const correctedWords = correctedText.trim().split(/\s+/).filter(w => w.length > 0);
+      // Split corrected text into words and distribute timing
+      const correctedWords: string[] = correctedText.split(/\s+/).filter((w: string) => w.length > 0);
       
       if (correctedWords.length === 0) {
-        return { message: '❌ Please provide the corrected text.' };
+        return { message: '❌ Correction resulted in empty text.' };
       }
 
-      // Create new transcript segments by distributing words across the time span
-      // This preserves the original timing but uses the corrected text
-      const newTranscript: TranscriptSegment[] = [];
+      // Create new transcript segments
       const wordDuration = totalDuration / correctedWords.length;
+      const newTranscript: TranscriptSegment[] = [];
 
-      correctedWords.forEach((word, index) => {
+      correctedWords.forEach((word: string, index: number) => {
         const wordStart = startTime + (index * wordDuration);
         const wordEnd = wordStart + wordDuration;
         
@@ -721,15 +808,16 @@ export const correctTranscriptionTool = createTool({
 
       await jobQueue.publishJob(previewJob);
 
-      logger.info('[TOOL SUCCESS] correctTranscriptionTool - queued preview with corrected transcript', {
+      logger.info('[TOOL SUCCESS] correctTranscriptionTool - queued preview with AI-corrected transcript', {
         chunkIndex,
         jobId: previewJobId,
         originalWordCount: originalTranscript.length,
         correctedWordCount: correctedWords.length,
+        correction: correctionRequest.substring(0, 50),
       });
 
       return {
-        message: `✏️ Transcript corrected!\n\n🎬 Regenerating preview with your corrections...\n\nI'll send you the updated preview shortly.`,
+        message: `✏️ Got it! I've corrected the transcript.\n\n📝 *Original:* "${originalText.substring(0, 80)}${originalText.length > 80 ? '...' : ''}"\n\n✨ *Corrected:* "${correctedText.substring(0, 80)}${correctedText.length > 80 ? '...' : ''}"\n\n🎬 Regenerating preview with your changes...\n\nI'll send you the updated preview shortly.`,
         jobQueued: true,
       };
     } catch (error) {

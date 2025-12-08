@@ -300,16 +300,32 @@ async function handleTranscribeChunkResult(result: TranscribeChunkResult): Promi
 async function handleGeneratePreviewResult(result: GeneratePreviewResult): Promise<void> {
   const { sessionId, data } = result;
   
-  logger.info('🎬 Preview generated', { sessionId, chunkId: data.chunkId });
+  logger.info('🎬 Preview generated', { sessionId, chunkId: data.chunkId, hasTranscript: !!data.transcript });
 
   // Update chunk
   const chunk = await VideoChunk.findOne({ where: { chunkId: data.chunkId } });
   if (!chunk) return;
 
-  await chunk.update({
-    status: 'PREVIEW_READY',
-    previewUrl: data.previewUrl,
-  });
+  // If transcript is provided (word-level or corrected), save it to DB
+  // This ensures the final render uses the same transcript shown in preview
+  if (data.transcript && data.transcript.length > 0) {
+    logger.info('📝 Saving updated transcript to chunk', {
+      chunkId: data.chunkId,
+      segmentCount: data.transcript.length,
+      firstSegment: data.transcript[0],
+      lastSegment: data.transcript[data.transcript.length - 1],
+    });
+    await chunk.update({
+      status: 'PREVIEW_READY' as const,
+      previewUrl: data.previewUrl,
+      transcript: JSON.stringify(data.transcript),
+    });
+  } else {
+    await chunk.update({
+      status: 'PREVIEW_READY' as const,
+      previewUrl: data.previewUrl,
+    });
+  }
 
   // Get session
   const session = await CaptionSession.findOne({ where: { sessionId } });

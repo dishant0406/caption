@@ -12,21 +12,25 @@ export const envSchema = z.object({
   AZURE_STORAGE_CONTAINER_NAME: z.string().default('caption-videos'),
 
   // Transcription Provider Configuration
-  // Options: 'azure-openai' (Whisper), 'azure-gpt4o' (GPT-4o), 'openai', 'deepgram', 'assemblyai'
-  TRANSCRIPTION_PROVIDER: z.enum(['azure-openai', 'azure-gpt4o', 'openai', 'deepgram', 'assemblyai']).default('azure-openai'),
+  // Options: 'azure-openai' (Whisper - segment-level), 'fal-whisper' (Fal.ai - word-level)
+  // Use 'azure-openai' for segment-level timestamps, 'fal-whisper' for word-level timestamps
+  TRANSCRIPTION_PROVIDER: z.enum(['azure-openai', 'fal-whisper']).default('azure-openai'),
+  
+  // Word-level transcription provider (for word-by-word captions)
+  // Fal.ai Whisper provides more accurate word-level timestamps
+  WORD_TRANSCRIPTION_PROVIDER: z.enum(['azure-openai', 'fal-whisper']).default('fal-whisper'),
 
-  // Azure OpenAI Configuration (for Whisper)
+  // Azure OpenAI Configuration (for Whisper - segment-level transcription)
   AZURE_OPENAI_ENDPOINT: z.string().url().optional(),
   AZURE_OPENAI_API_KEY: z.string().optional(),
   AZURE_OPENAI_WHISPER_DEPLOYMENT: z.string().default('whisper'),
   AZURE_OPENAI_API_VERSION: z.string().default('2024-02-01'),
 
-  // Azure GPT-4o Transcription Configuration
-  // Uses Bearer token auth instead of api-key header
-  AZURE_GPT4O_ENDPOINT: z.string().url().optional(),
-  AZURE_GPT4O_API_KEY: z.string().optional(),
-  AZURE_GPT4O_DEPLOYMENT: z.string().default('gpt-4o-transcribe-diarize'),
-  AZURE_GPT4O_API_VERSION: z.string().default('2025-03-01-preview'),
+  // Fal.ai Configuration (for word-level transcription)
+  // Get your API key from https://fal.ai/dashboard/keys
+  FAL_KEY: z.string().optional(),
+  // Fal.ai poll interval in milliseconds (default 3000 = 3 seconds)
+  FAL_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
 
   // OpenAI Configuration (fallback/alternative)
   OPENAI_API_KEY: z.string().optional(),

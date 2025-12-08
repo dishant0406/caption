@@ -169,6 +169,54 @@ export type CaptionMode = 'word' | 'sentence';
 const TIMESTAMP_OFFSET_SECONDS = -0.2; // Show captions 200ms earlier
 
 /**
+ * Sanitize caption text for ASS subtitle format
+ * Removes problematic characters and cleans up formatting
+ */
+function sanitizeCaptionText(text: string): string {
+  let sanitized = text;
+  
+  // Trim whitespace
+  sanitized = sanitized.trim();
+  
+  // Remove invisible/zero-width characters
+  sanitized = sanitized.replace(/[\u200B-\u200D\uFEFF]/g, '');
+  
+  // Remove backslashes that aren't valid ASS escapes
+  // Valid ASS escapes: \N (newline), \n (soft break), \h (hard space)
+  // Remove standalone backslashes or unknown escape sequences
+  sanitized = sanitized.replace(/\\(?![Nnh])/g, '');
+  
+  // Remove curly braces (used for ASS override tags)
+  sanitized = sanitized.replace(/[{}]/g, '');
+  
+  // Remove control characters except newlines
+  sanitized = sanitized.replace(/[\x00-\x09\x0B-\x0C\x0E-\x1F\x7F]/g, '');
+  
+  // Remove multiple consecutive spaces
+  sanitized = sanitized.replace(/\s+/g, ' ');
+  
+  // Remove leading/trailing whitespace (again after cleanup)
+  sanitized = sanitized.trim();
+  
+  // Remove leading quotes (single, double, and smart quotes)
+  sanitized = sanitized.replace(/^["'""''`]+/, '');
+  
+  // Remove trailing quotes (single, double, and smart quotes)
+  sanitized = sanitized.replace(/["'""''`]+$/, '');
+  
+  // Remove leading punctuation that shouldn't be at start of caption
+  sanitized = sanitized.replace(/^[,;:.!?\-–—]+\s*/, '');
+  
+  // Remove trailing punctuation anomalies
+  sanitized = sanitized.replace(/\s+[,;:]+$/, '');
+  
+  // Trim again after all cleanups
+  sanitized = sanitized.trim();
+  
+  return sanitized;
+}
+
+/**
  * Generate ASS subtitle file content from caption data
  * @param captions - Array of caption segments with start, end, and text
  * @param style - Caption style configuration
@@ -263,39 +311,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
   };
 
-  // Process based on caption mode - use adjustedCaptions for correct timing
-  if (captionMode === 'word') {
-    // Word-by-word mode: Split each segment into individual words
-    // Each word gets its own timed subtitle event (TikTok style)
-    adjustedCaptions.forEach((caption) => {
-      const words = caption.text.trim().split(/\s+/).filter(w => w.length > 0);
-      if (words.length === 0) return;
-
-      const segmentDuration = caption.end - caption.start;
-      const wordDuration = segmentDuration / words.length;
-
-      words.forEach((word, wordIndex) => {
-        const wordStart = caption.start + (wordIndex * wordDuration);
-        const wordEnd = wordStart + wordDuration;
-        
-        const startTime = timeToAss(wordStart);
-        const endTime = timeToAss(wordEnd);
-        
-        // Escape special characters
-        const escapedWord = word.replace(/\n/g, '\\N').replace(/,/g, '\\,');
-        ass += `Dialogue: 0,${startTime},${endTime},Default,,0,0,0,,${escapedWord}\n`;
-      });
-    });
-  } else {
-    // Sentence mode: Show full sentences/segments (default YouTube style)
-    adjustedCaptions.forEach((caption) => {
-      const startTime = timeToAss(caption.start);
-      const endTime = timeToAss(caption.end);
-      // Escape special characters and add text
-      const text = caption.text.replace(/\n/g, '\\N').replace(/,/g, '\\,');
-      ass += `Dialogue: 0,${startTime},${endTime},Default,,0,0,0,,${text}\n`;
-    });
-  }
+  // Process captions - use segments directly (no word splitting)
+  // For word mode, the transcription provider should return word-level segments
+  // For sentence mode, the transcription provider returns sentence-level segments
+  adjustedCaptions.forEach((caption) => {
+    const startTime = timeToAss(caption.start);
+    const endTime = timeToAss(caption.end);
+    // Sanitize caption text to remove problematic characters, then escape for ASS format
+    const sanitized = sanitizeCaptionText(caption.text);
+    // Only escape newlines for ASS format - commas don't need escaping in the Text field (it's the last field)
+    const text = sanitized.replace(/\n/g, '\\N');
+    ass += `Dialogue: 0,${startTime},${endTime},Default,,0,0,0,,${text}\n`;
+  });
 
   return ass;
 }

@@ -13,7 +13,7 @@ import {
   initializeTranscriptionProviders,
   TranscriptionOptions,
   TranscriptionResult,
-  TranscriptionSegment,
+  TranscriptionSegment
 } from './providers';
 
 // Re-export types from providers
@@ -223,10 +223,72 @@ export async function healthCheckProviders(): Promise<Record<string, boolean>> {
   return getTranscriptionFactory().healthCheckAll();
 }
 
+/**
+ * Transcribe audio with word-level timestamps
+ * Uses the configured word-level provider (default: fal-whisper)
+ * Best for word-by-word caption mode
+ */
+export async function transcribeAudioWithWordTimings(
+  audioUrl: string,
+  language?: string
+): Promise<TranscriptionResult> {
+  if (!isInitialized) {
+    initializeTranscription();
+  }
+
+  // Get the word-level provider (fal-whisper by default)
+  const factory = getTranscriptionFactory();
+  let provider;
+  
+  try {
+    // Try to get the word-level provider
+    const wordProvider = factory.getProviderByName('fal-whisper');
+    if (wordProvider && wordProvider.isConfigured()) {
+      provider = wordProvider;
+    } else {
+      // Fall back to default provider
+      provider = getTranscriptionProvider();
+    }
+  } catch {
+    provider = getTranscriptionProvider();
+  }
+
+  logger.info('Starting word-level transcription', {
+    audioUrl,
+    language,
+    provider: provider.name,
+  });
+
+  try {
+    const options: TranscriptionOptions = {
+      language,
+      timestampGranularity: 'word',
+    };
+
+    const result = await provider.transcribe(audioUrl, options);
+
+    logger.info('Word-level transcription completed', {
+      textLength: result.text.length,
+      segmentCount: result.segments.length,
+      language: result.language,
+      provider: provider.name,
+    });
+
+    return result;
+  } catch (error) {
+    logger.error('Word-level transcription failed', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      provider: provider.name,
+    });
+    throw error;
+  }
+}
+
 // Export as default object for backwards compatibility
 export default {
   initializeTranscription,
   transcribeAudio,
+  transcribeAudioWithWordTimings,
   formatCaptionSegments,
   mergeShortSegments,
   generateWordTimings,

@@ -131,14 +131,16 @@ export const INTENT_METADATA: Record<IntentType, IntentMetadata> = {
   [IntentType.CORRECT_TRANSCRIPTION]: {
     type: IntentType.CORRECT_TRANSCRIPTION,
     category: IntentCategory.TRANSCRIPTION,
-    description: 'Correct the transcription for the current chunk with user-provided text. User provides corrected text after "fix:" prefix.',
+    description: 'Intelligently correct words or phrases in the transcription using AI. User can say things like "its X not Y" to fix a word, or provide full corrected text. AI will apply the correction to the existing transcript.',
     examples: [
-      'fix: Hello world this is correct',
-      'fix: The correct text goes here',
-      'correct: This is what it should say',
-      'Fix the caption to say...',
+      'its Dishant not Dishan',
+      'change hello to hi',
+      'fix: the word should be caption not captions',
+      'its spelled correctly not corectly',
+      'replace AI with artificial intelligence',
+      'fix the name to John',
     ],
-    requiredEntities: ['correctedText'],
+    requiredEntities: ['correctionRequest'],
   },
   [IntentType.CONVERT_TRANSCRIPT]: {
     type: IntentType.CONVERT_TRANSCRIPT,

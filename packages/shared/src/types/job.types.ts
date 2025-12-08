@@ -169,6 +169,9 @@ export interface GeneratePreviewResult extends BaseJobResult {
     chunkId: string;
     previewUrl: string;
     thumbnailUrl?: string;
+    // Updated transcript with ABSOLUTE timestamps (for word-level mode)
+    // This will be saved to DB to preserve corrections/word-level timing for final render
+    transcript?: TranscriptSegment[];
   };
 }
 
