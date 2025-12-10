@@ -10,6 +10,8 @@ A scalable WhatsApp bot that automatically transcribes and adds beautiful captio
 - **User Approval Workflow**: Review and edit captions per chunk
 - **Low-res Preview**: Fast preview generation before HD rendering
 - **Freemium Model**: 2 free videos, then paid subscription
+- **AI-Powered Agent**: Mastra-based conversational AI for natural interactions
+- **Input Guardrails**: Multi-layered security against prompt injection, spam, and inappropriate content
 
 ## 🏗️ Architecture
 
@@ -244,6 +246,24 @@ GET /health
 ### Webhook (for WhatsApp)
 ```
 POST /webhook
+```
+
+## 🛡️ Security & Guardrails
+
+The bot implements comprehensive input guardrails to protect against malicious inputs and abuse. See [GUARDRAILS.md](./docs/GUARDRAILS.md) for detailed documentation.
+
+**Implemented Protections**:
+- Unicode normalization and control character stripping
+- Rate limiting and spam detection
+- Prompt injection attack detection
+- Content moderation (hate, harassment, violence, etc.)
+
+**Configuration** (in `.env`):
+```bash
+GUARDRAILS_ENABLED=true
+GUARDRAILS_PROMPT_INJECTION_ENABLED=true
+GUARDRAILS_MODERATION_ENABLED=true
+GUARDRAILS_SPAM_MAX_PER_MINUTE=15
 ```
 
 ## 🚢 Deployment

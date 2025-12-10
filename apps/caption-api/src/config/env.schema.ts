@@ -118,6 +118,17 @@ export const envSchema = z.object({
   MAX_VIDEO_DURATION_PAID: z.coerce.number().default(300), // 5 minutes
   MAX_FILE_SIZE_FREE: z.coerce.number().default(52428800), // 50MB
   MAX_FILE_SIZE_PAID: z.coerce.number().default(209715200), // 200MB
+
+  // Input Guardrails Configuration
+  GUARDRAILS_ENABLED: booleanString.default(true),
+  GUARDRAILS_UNICODE_NORMALIZER_ENABLED: booleanString.default(true),
+  GUARDRAILS_SPAM_DETECTOR_ENABLED: booleanString.default(true),
+  GUARDRAILS_SPAM_MAX_PER_MINUTE: z.coerce.number().min(1).default(15),
+  GUARDRAILS_SPAM_MAX_PER_HOUR: z.coerce.number().min(1).default(150),
+  GUARDRAILS_PROMPT_INJECTION_ENABLED: booleanString.default(true),
+  GUARDRAILS_PROMPT_INJECTION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
+  GUARDRAILS_MODERATION_ENABLED: booleanString.default(true),
+  GUARDRAILS_MODERATION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.8),
 });
 
 // Export the schema type for TypeScript usage
@@ -334,5 +345,43 @@ export const envSchemaMetadata: Record<
   MAX_FILE_SIZE_PAID: {
     description: 'Max file size for paid tier (bytes)',
     example: '209715200',
+  },
+
+  // Input Guardrails Configuration
+  GUARDRAILS_ENABLED: {
+    description: 'Enable all input guardrails',
+    example: 'true',
+  },
+  GUARDRAILS_UNICODE_NORMALIZER_ENABLED: {
+    description: 'Enable Unicode normalization processor',
+    example: 'true',
+  },
+  GUARDRAILS_SPAM_DETECTOR_ENABLED: {
+    description: 'Enable spam detection processor',
+    example: 'true',
+  },
+  GUARDRAILS_SPAM_MAX_PER_MINUTE: {
+    description: 'Maximum messages per minute before flagging as spam',
+    example: '15',
+  },
+  GUARDRAILS_SPAM_MAX_PER_HOUR: {
+    description: 'Maximum messages per hour before flagging as spam',
+    example: '150',
+  },
+  GUARDRAILS_PROMPT_INJECTION_ENABLED: {
+    description: 'Enable prompt injection detection',
+    example: 'true',
+  },
+  GUARDRAILS_PROMPT_INJECTION_THRESHOLD: {
+    description: 'Threshold for prompt injection detection (0-1)',
+    example: '0.7',
+  },
+  GUARDRAILS_MODERATION_ENABLED: {
+    description: 'Enable content moderation',
+    example: 'true',
+  },
+  GUARDRAILS_MODERATION_THRESHOLD: {
+    description: 'Threshold for content moderation (0-1)',
+    example: '0.8',
   },
 };
