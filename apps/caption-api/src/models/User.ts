@@ -1,13 +1,13 @@
 import { getSequelize } from '@/config/database';
 import type { SubscriptionStatus } from '@caption/shared';
 import {
-  CreationOptional,
-  DataTypes,
-  ForeignKey,
-  InferAttributes,
-  InferCreationAttributes,
-  Model,
-  ModelStatic,
+    CreationOptional,
+    DataTypes,
+    ForeignKey,
+    InferAttributes,
+    InferCreationAttributes,
+    Model,
+    ModelStatic,
 } from 'sequelize';
 import type { PlanModel } from './Plan';
 
