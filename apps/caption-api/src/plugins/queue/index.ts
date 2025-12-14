@@ -1,11 +1,11 @@
 import { getRedisConfig } from '@/config';
 import { logger } from '@/plugins/logger';
 import {
-  QUEUE_CHANNELS,
-  type JobPayload,
-  type JobPriority,
-  type JobResult,
-  type JobType,
+    QUEUE_CHANNELS,
+    type JobPayload,
+    type JobPriority,
+    type JobResult,
+    type JobType,
 } from '@caption/shared';
 import { createClient } from 'redis';
 import { v4 as uuidv4 } from 'uuid';
@@ -54,10 +54,46 @@ export class JobQueueManager {
 
       // Create publisher client
       this.publisher = createClient(clientOptions);
+      
+      // Set up error handlers BEFORE connecting
+      this.publisher.on('error', (error: Error) => {
+        logger.error('Redis Publisher Error', error);
+      });
+
+      this.publisher.on('connect', () => {
+        logger.info('Redis publisher connected');
+      });
+
+      this.publisher.on('reconnecting', () => {
+        logger.warn('Redis publisher reconnecting');
+      });
+
+      this.publisher.on('ready', () => {
+        logger.info('Redis publisher ready');
+      });
+
       await this.publisher.connect();
 
       // Create subscriber client (separate connection required)
       this.subscriber = createClient(clientOptions);
+      
+      // Set up error handlers BEFORE connecting
+      this.subscriber.on('error', (error: Error) => {
+        logger.error('Redis Subscriber Error', error);
+      });
+
+      this.subscriber.on('connect', () => {
+        logger.info('Redis subscriber connected');
+      });
+
+      this.subscriber.on('reconnecting', () => {
+        logger.warn('Redis subscriber reconnecting');
+      });
+
+      this.subscriber.on('ready', () => {
+        logger.info('Redis subscriber ready');
+      });
+
       await this.subscriber.connect();
 
       // Subscribe to results channel
@@ -224,12 +260,28 @@ export class JobQueueManager {
    * Get client options from config
    */
   private getClientOptions(): Parameters<typeof createClient>[0] {
+    const baseOptions: Parameters<typeof createClient>[0] = {
+      socket: {
+        reconnectStrategy: (retries) => {
+          if (retries > 20) {
+            logger.error('Redis max reconnection attempts reached');
+            return new Error('Max reconnection attempts reached');
+          }
+          const delay = Math.min(retries * 100, 3000);
+          logger.warn(`Redis reconnecting in ${delay}ms (attempt ${retries})`);
+          return delay;
+        },
+      },
+    };
+
     if (this.config.url) {
-      return { url: this.config.url };
+      return { ...baseOptions, url: this.config.url };
     }
 
     const options: Parameters<typeof createClient>[0] = {
+      ...baseOptions,
       socket: {
+        ...baseOptions.socket,
         host: this.config.host || 'localhost',
         port: this.config.port || 6379,
       },

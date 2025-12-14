@@ -1,10 +1,10 @@
 import { getRedisConfig } from '@/config';
 import { logger } from '@/plugins/logger';
 import {
-  createClient,
-  createCluster,
-  RedisClientType,
-  RedisClusterType,
+    createClient,
+    createCluster,
+    RedisClientType,
+    RedisClusterType,
 } from 'redis';
 
 // Redis client type union
@@ -83,12 +83,25 @@ export class CacheInstance {
       return createCluster(clusterOptions) as unknown as RedisClient;
     }
 
-    const options: Parameters<typeof createClient>[0] = {};
+    const options: Parameters<typeof createClient>[0] = {
+      socket: {
+        reconnectStrategy: (retries) => {
+          if (retries > 20) {
+            logger.error('Redis max reconnection attempts reached');
+            return new Error('Max reconnection attempts reached');
+          }
+          const delay = Math.min(retries * 100, 3000);
+          logger.warn(`Redis reconnecting in ${delay}ms (attempt ${retries})`);
+          return delay;
+        },
+      },
+    };
 
     if (this.config.url) {
       options.url = this.config.url;
     } else {
       options.socket = {
+        ...options.socket,
         host: this.config.host,
         port: this.config.port,
       };
@@ -104,20 +117,35 @@ export class CacheInstance {
   async connect(): Promise<void> {
     if (this.connected) return;
 
+    // Set up error handlers before connecting
+    this.client.on('error', (error: Error) => {
+      logger.error('Redis error', error);
+      // Don't set connected to false - let reconnect handle it
+    });
+
+    this.client.on('connect', () => {
+      logger.info('Redis connected successfully');
+      this.connected = true;
+    });
+
+    this.client.on('reconnecting', () => {
+      logger.warn('Redis client reconnecting');
+      this.connected = false;
+    });
+
+    this.client.on('ready', () => {
+      logger.info('Redis client ready');
+      this.connected = true;
+    });
+
     try {
       await this.client.connect();
-      this.connected = true;
-
-      this.client.on('error', (error: Error) => {
-        logger.error('Redis error', error);
-        this.connected = false;
-      });
-
-      logger.info('Redis connected successfully');
     } catch (error) {
-      throw new Error(
-        `Failed to connect to Redis: ${error instanceof Error ? error.message : 'Unknown error'}`
+      logger.error(
+        'Failed to connect to Redis',
+        error instanceof Error ? error : new Error(String(error))
       );
+      throw error;
     }
   }
 

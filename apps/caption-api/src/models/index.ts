@@ -1,21 +1,27 @@
 // Import model initializers
 import {
-    CaptionSession,
-    initializeCaptionSessionModel
+  CaptionSession,
+  initializeCaptionSessionModel
 } from './CaptionSession';
+import { initializePlanModel } from './Plan';
+import { initializeReferralModel } from './Referral';
 import { initializeUserModel, User } from './User';
 import {
-    initializeVideoChunkModel,
-    VideoChunk
+  initializeVideoChunkModel,
+  VideoChunk
 } from './VideoChunk';
 
 // Export models
 export { CaptionSession } from './CaptionSession';
+export { Plan } from './Plan';
+export { Referral } from './Referral';
 export { User } from './User';
 export { VideoChunk } from './VideoChunk';
 
 // Export types
 export type { CaptionSessionModel } from './CaptionSession';
+export type { PlanModel, PlanType } from './Plan';
+export type { ReferralModel, ReferralStatus, ReferralType } from './Referral';
 export type { UserModel } from './User';
 export type { VideoChunkModel } from './VideoChunk';
 
@@ -23,10 +29,42 @@ export type { VideoChunkModel } from './VideoChunk';
 export const initializeModels = (): void => {
   // Initialize all models
   const user = initializeUserModel();
+  const plan = initializePlanModel();
+  const referral = initializeReferralModel();
   const captionSession = initializeCaptionSessionModel();
   const videoChunk = initializeVideoChunkModel();
 
   // Define associations between models
+
+  // Plan <-> User (One-to-Many)
+  plan.hasMany(user, {
+    foreignKey: 'subscriptionPlanId',
+    as: 'users',
+  });
+  user.belongsTo(plan, {
+    foreignKey: 'subscriptionPlanId',
+    as: 'subscriptionPlan',
+  });
+
+  // User <-> Referral (One-to-Many) - as referrer
+  user.hasMany(referral, {
+    foreignKey: 'referrerPhone',
+    as: 'referralsMade',
+  });
+  referral.belongsTo(user, {
+    foreignKey: 'referrerPhone',
+    as: 'referrer',
+  });
+
+  // User <-> Referral (One-to-Many) - as referred
+  user.hasMany(referral, {
+    foreignKey: 'referredPhone',
+    as: 'referralsReceived',
+  });
+  referral.belongsTo(user, {
+    foreignKey: 'referredPhone',
+    as: 'referred',
+  });
 
   // User <-> CaptionSession (One-to-Many)
   user.hasMany(captionSession, {

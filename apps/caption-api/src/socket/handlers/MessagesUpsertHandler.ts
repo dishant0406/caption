@@ -2,6 +2,7 @@ import { agentService } from '@/agent/services/agent.service';
 import { VideoProcessingState } from '@/agent/types';
 import { CaptionSession, User } from '@/models';
 import { logger } from '@/plugins/logger';
+import ReferralService from '@/services/referral.service';
 import { whatsappService } from '@/services/whatsapp/WhatsAppService';
 import { v4 as uuidv4 } from 'uuid';
 import type { IWebhookHandler } from '../handler';
@@ -283,15 +284,22 @@ export class MessagesUpsertHandler implements IWebhookHandler<WebhookPayload> {
     let user = await User.findOne({ where: { phoneNumber } });
 
     if (!user) {
+      // Generate unique referral code for new user
+      const referralCode = await ReferralService.generateReferralCode();
+
       user = await User.create({
         phoneNumber,
         whatsappId: phoneNumber,
         name: pushName || 'Unknown',
         subscriptionStatus: 'FREE',
         freeVideosUsed: 0,
+        referralCode,
       });
 
-      logger.info('👤 Created new user', { phoneNumber });
+      logger.info('👤 Created new user with referral code', { 
+        phoneNumber, 
+        referralCode 
+      });
     } else if (pushName && user.name !== pushName) {
       // Update name if changed
       await user.update({ name: pushName });

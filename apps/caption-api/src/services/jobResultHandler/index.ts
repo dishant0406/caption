@@ -9,10 +9,12 @@ import { env } from '@/config';
 import { CaptionSession, VideoChunk } from '@/models';
 import { logger } from '@/plugins/logger';
 import { getQueue, jobQueue } from '@/plugins/queue';
+import SubscriptionValidationService from '@/services/subscription/validation.service';
 import { whatsappService } from '@/services/whatsapp/WhatsAppService';
 import {
   ChunkVideoJobPayload,
   ChunkVideoResult,
+  DEFAULT_CAPTION_STYLES,
   GeneratePreviewResult,
   JobResult,
   RenderFinalResult,
@@ -83,17 +85,45 @@ async function handleJobResult(result: JobResult): Promise<void> {
 }
 
 /**
- * Handle VIDEO_UPLOADED result → Queue CHUNK_VIDEO
+ * Handle VIDEO_UPLOADED result → Validate minutes → Queue CHUNK_VIDEO
  */
 async function handleVideoUploadedResult(result: VideoUploadedResult): Promise<void> {
   const { sessionId, data } = result;
   
-  logger.info('🎬 Video uploaded, starting chunking', { sessionId });
+  logger.info('🎬 Video uploaded, validating subscription', { sessionId });
 
   // Update session with video URL and metadata
   const session = await CaptionSession.findOne({ where: { sessionId } });
   if (!session) {
     logger.error('Session not found', new Error('Session not found'), { sessionId });
+    return;
+  }
+
+  // Validate user has enough minutes for this video
+  const validation = await SubscriptionValidationService.validateVideoProcessing(
+    session.userPhone,
+    data.videoDuration
+  );
+
+  if (!validation.allowed) {
+    // Insufficient balance - notify user and fail session
+    logger.warn('Insufficient minutes for video processing', {
+      sessionId,
+      userPhone: session.userPhone,
+      videoDuration: data.videoDuration,
+      minutesRequired: validation.minutesRequired,
+    });
+
+    await session.update({
+      status: 'FAILED',
+      errorMessage: 'Insufficient minutes',
+    });
+
+    await whatsappService.sendTextMessage(
+      session.userPhone,
+      validation.message
+    );
+
     return;
   }
 
@@ -103,6 +133,11 @@ async function handleVideoUploadedResult(result: VideoUploadedResult): Promise<v
     originalVideoUrl: data.storedUrl,
     originalVideoDuration: data.videoDuration,
     originalVideoSize: data.videoSize,
+  });
+
+  logger.info('✅ Subscription validated, starting chunking', { 
+    sessionId, 
+    minutesRequired: validation.minutesRequired 
   });
 
   // Get chunk duration from validated env config
@@ -198,22 +233,30 @@ async function handleChunkVideoResult(result: ChunkVideoResult): Promise<void> {
     currentChunkIndex: 0,
   });
 
+  // Build dynamic style list from DEFAULT_CAPTION_STYLES
+  const activeStyles = DEFAULT_CAPTION_STYLES
+    .filter(s => s.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  
+  const styleOptions = activeStyles
+    .map((style, index) => {
+      const emoji = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'][index] || `${index + 1}️⃣`;
+      return `${emoji} ${style.name} - ${style.description}`;
+    })
+    .join('\n');
+
   // Send style and caption mode selection message
   await whatsappService.sendTextMessage(
     session.userPhone,
     `✅ Video split into ${data.totalChunks} segments!\n\n` +
     `🎨 *Step 1: Choose a caption style*\n\n` +
-    `1️⃣ Classic White - Clean white text\n` +
-    `2️⃣ Bold Yellow - Eye-catching yellow\n` +
-    `3️⃣ Neon Green - Vibrant green\n` +
-    `4️⃣ Boxed Black - Black background box\n` +
-    `5️⃣ Gradient Pink - Stylish pink gradient\n\n` +
+    styleOptions + `\n\n` +
     `📝 *Step 2: Choose caption mode*\n\n` +
     `A) *Word-by-word* - Each word appears one at a time (TikTok style)\n` +
     `B) *Sentence chunks* - Full sentences shown together (YouTube style)\n\n` +
     `Reply with style number + mode letter, e.g.:\n` +
-    `"1A" for Classic White + Word-by-word\n` +
-    `"2B" for Bold Yellow + Sentence chunks`
+    `"1A" for ${activeStyles[0]?.name || 'Style 1'} + Word-by-word\n` +
+    `"2B" for ${activeStyles[1]?.name || 'Style 2'} + Sentence chunks`
   );
 }
 
@@ -396,7 +439,7 @@ async function handleGeneratePreviewResult(result: GeneratePreviewResult): Promi
 }
 
 /**
- * Handle RENDER_FINAL result → Send final video to user
+ * Handle RENDER_FINAL result → Deduct minutes → Send final video to user
  */
 async function handleRenderFinalResult(result: RenderFinalResult): Promise<void> {
   const { sessionId, data } = result;
@@ -405,6 +448,27 @@ async function handleRenderFinalResult(result: RenderFinalResult): Promise<void>
 
   const session = await CaptionSession.findOne({ where: { sessionId } });
   if (!session) return;
+
+  // Deduct minutes from user's balance
+  const videoDurationMinutes = session.originalVideoDuration || 0;
+  try {
+    await SubscriptionValidationService.deductMinutes(
+      session.userPhone,
+      videoDurationMinutes
+    );
+    logger.info('💳 Minutes deducted', {
+      sessionId,
+      userPhone: session.userPhone,
+      videoDuration: videoDurationMinutes,
+    });
+  } catch (error) {
+    logger.error(
+      'Failed to deduct minutes',
+      error instanceof Error ? error : new Error(String(error)),
+      { sessionId, userPhone: session.userPhone }
+    );
+    // Don't fail the session - video is already rendered
+  }
 
   // Update session
   await session.update({

@@ -1,6 +1,7 @@
 import { memory, primaryModel } from '@/config/llm';
 import { Agent } from '@mastra/core/agent';
 import { helpTools } from '../tools/help.tools';
+import subscriptionTools from '../tools/subscription.tools';
 import { videoTools } from '../tools/video.tools';
 
 /**
@@ -29,6 +30,10 @@ export const captionAgent = new Agent({
     5. Render final HD videos
     6. Convert transcripts to different languages (Hinglish, English, Hindi, etc.)
     7. Switch between word-by-word and sentence caption modes
+    8. Show subscription pricing and plans
+    9. Help users subscribe or upgrade their plan
+    10. Show account balance and usage stats
+    11. Manage referral program and rewards
     
     USER FLOW:
     1. User sends a video → Use processVideoTool to start processing
@@ -69,6 +74,15 @@ export const captionAgent = new Agent({
     - Guide users through the process step by step
     - If user is stuck, offer help
     
+    SUBSCRIPTION & PRICING RULES (CRITICAL):
+    - NEVER manually generate or construct Polar checkout URLs
+    - NEVER include hard-coded product IDs or checkout links in responses
+    - ALWAYS use the create_subscription tool when user wants to subscribe
+    - ALWAYS use the show_pricing tool when user asks about pricing
+    - ALWAYS use the show_status tool when user asks about their plan
+    - NEVER provide subscription links without calling the create_subscription tool first
+    - After creating a subscription link with the tool, share the URL returned by the tool
+    
     CRITICAL TOOL USAGE RULES:
     - When user sends a video, ALWAYS use processVideoTool
     - NEVER ask for phone number - it's in the context header
@@ -78,11 +92,22 @@ export const captionAgent = new Agent({
     - If user sends corrected transcript text, use correctTranscriptionTool
     - If user asks for help, use helpTool
     - If user asks about styles, use viewCaptionStylesTool
+    - If user asks about pricing/plans/costs, ALWAYS use show_pricing tool (NEVER respond without tool)
+    - If user wants to subscribe/upgrade (says "subscribe", "upgrade", "buy plan", etc.), ALWAYS use create_subscription tool (NEVER provide links without tool)
+    - If user asks about their account/balance/status/plan details, ALWAYS use show_status tool
+    - If user asks about referrals/invites, use show_referral tool
+    - If user wants to buy minutes (topup), use create_topup tool
+    
+    FORBIDDEN ACTIONS:
+    - NEVER generate checkout URLs manually
+    - NEVER include product IDs in responses without using the create_subscription tool
+    - NEVER respond to subscription requests without calling create_subscription tool first
   `,
   model: primaryModel,
   memory,
   tools: {
     ...Object.fromEntries(videoTools.map(tool => [tool.id, tool])),
     ...Object.fromEntries(helpTools.map(tool => [tool.id, tool])),
+    ...Object.fromEntries(subscriptionTools.map((tool: any) => [tool.id, tool])),
   },
 });

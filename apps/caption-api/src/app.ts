@@ -4,6 +4,8 @@ import cors from 'cors';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import seedRoutes from './routes/seed';
+import webhookRoutes from './routes/webhooks';
 
 // Create Express app
 const app: Express = express();
@@ -44,7 +46,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Request logging middleware
 app.use(
   morgan('combined', {
-    skip: (_req) => {
+    skip: (_req: Request) => {
       return env.NODE_ENV === 'production' && _req.url?.includes('/health');
     },
   })
@@ -82,6 +84,12 @@ app.get(`${env.API_PREFIX}/health`, (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// Seed routes (for database seeding)
+app.use(`${env.API_PREFIX}/seed`, seedRoutes);
+
+// Webhook routes (with raw body parser)
+app.use('/webhooks', webhookRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

@@ -13,6 +13,17 @@ export async function initializeCache(): Promise<RedisClientType> {
 
   redisClient = createClient({
     url: env.REDIS_URL,
+    socket: {
+      reconnectStrategy: (retries) => {
+        if (retries > 20) {
+          logger.error('Redis max reconnection attempts reached');
+          return new Error('Max reconnection attempts reached');
+        }
+        const delay = Math.min(retries * 100, 3000);
+        logger.warn(`Redis reconnecting in ${delay}ms (attempt ${retries})`);
+        return delay;
+      },
+    },
   });
 
   redisClient.on('error', (err) => {
@@ -25,6 +36,10 @@ export async function initializeCache(): Promise<RedisClientType> {
 
   redisClient.on('reconnecting', () => {
     logger.warn('Redis client reconnecting');
+  });
+
+  redisClient.on('ready', () => {
+    logger.info('Redis client ready');
   });
 
   await redisClient.connect();

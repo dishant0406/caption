@@ -129,6 +129,25 @@ export const envSchema = z.object({
   GUARDRAILS_PROMPT_INJECTION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
   GUARDRAILS_MODERATION_ENABLED: booleanString.default(true),
   GUARDRAILS_MODERATION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.8),
+
+  // Polar.sh Payment Configuration
+  POLAR_ACCESS_TOKEN: z.string().optional(),
+  POLAR_API_KEY: z.string().optional(),
+  POLAR_WEBHOOK_SECRET: z.string().optional(),
+  POLAR_ORGANIZATION_ID: z.string().optional(),
+  POLAR_SERVER: z.enum(['sandbox', 'production']).default('production'),
+  POLAR_BASE_URL: z.string().url().default('https://api.polar.sh'),
+  
+  // Application URLs
+  APP_URL: z.string().url().default('https://caption.bot'),
+  
+  // Polar Product IDs for subscription tiers (optional for seeding)
+  POLAR_STARTER_PRODUCT_ID: z.string().optional(),
+  POLAR_STARTER_PRICE_ID: z.string().optional(),
+  POLAR_PRO_PRODUCT_ID: z.string().optional(),
+  POLAR_PRO_PRICE_ID: z.string().optional(),
+  POLAR_UNLIMITED_PRODUCT_ID: z.string().optional(),
+  POLAR_UNLIMITED_PRICE_ID: z.string().optional(),
 });
 
 // Export the schema type for TypeScript usage
@@ -383,5 +402,62 @@ export const envSchemaMetadata: Record<
   GUARDRAILS_MODERATION_THRESHOLD: {
     description: 'Threshold for content moderation (0-1)',
     example: '0.8',
+  },
+
+  // Polar.sh Payment Configuration
+  POLAR_ACCESS_TOKEN: {
+    description: 'Polar.sh Access Token for SDK authentication',
+    example: 'polar_at_...',
+  },
+  POLAR_API_KEY: {
+    description: 'Polar.sh API key for payment processing',
+    example: 'polar_sk_...',
+  },
+  POLAR_WEBHOOK_SECRET: {
+    description: 'Polar.sh webhook secret for signature verification',
+    example: 'whsec_...',
+  },
+  POLAR_ORGANIZATION_ID: {
+    description: 'Polar.sh organization ID',
+    example: 'org_...',
+  },
+  POLAR_SERVER: {
+    description: 'Polar.sh server environment (sandbox or production)',
+    example: 'production',
+  },
+  POLAR_BASE_URL: {
+    description: 'Polar.sh API base URL',
+    example: 'https://api.polar.sh',
+  },
+  
+  // Application URLs
+  APP_URL: {
+    description: 'Application base URL for redirect URLs',
+    example: 'https://caption.bot',
+  },
+  
+  POLAR_STARTER_PRODUCT_ID: {
+    description: 'Polar.sh product ID for STARTER tier',
+    example: 'prod_...',
+  },
+  POLAR_STARTER_PRICE_ID: {
+    description: 'Polar.sh price ID for STARTER tier',
+    example: 'price_...',
+  },
+  POLAR_PRO_PRODUCT_ID: {
+    description: 'Polar.sh product ID for PRO tier',
+    example: 'prod_...',
+  },
+  POLAR_PRO_PRICE_ID: {
+    description: 'Polar.sh price ID for PRO tier',
+    example: 'price_...',
+  },
+  POLAR_UNLIMITED_PRODUCT_ID: {
+    description: 'Polar.sh product ID for UNLIMITED tier',
+    example: 'prod_...',
+  },
+  POLAR_UNLIMITED_PRICE_ID: {
+    description: 'Polar.sh price ID for UNLIMITED tier',
+    example: 'price_...',
   },
 };

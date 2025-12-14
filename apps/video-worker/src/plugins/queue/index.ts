@@ -16,18 +16,61 @@ export class JobQueueWorker {
   async initialize(): Promise<void> {
     const env = getEnv();
 
+    const clientOptions = {
+      url: env.REDIS_URL,
+      socket: {
+        reconnectStrategy: (retries: number) => {
+          if (retries > 20) {
+            logger.error('Redis max reconnection attempts reached');
+            return new Error('Max reconnection attempts reached');
+          }
+          const delay = Math.min(retries * 100, 3000);
+          logger.warn(`Redis reconnecting in ${delay}ms (attempt ${retries})`);
+          return delay;
+        },
+      },
+    };
+
     // Create subscriber client for receiving jobs
-    subscriberClient = createClient({ url: env.REDIS_URL });
+    subscriberClient = createClient(clientOptions);
+    
     subscriberClient.on('error', (err) => {
       logger.error('Redis Subscriber Error', { error: err.message });
     });
+
+    subscriberClient.on('connect', () => {
+      logger.info('Redis subscriber connected');
+    });
+
+    subscriberClient.on('reconnecting', () => {
+      logger.warn('Redis subscriber reconnecting');
+    });
+
+    subscriberClient.on('ready', () => {
+      logger.info('Redis subscriber ready');
+    });
+
     await subscriberClient.connect();
 
     // Create publisher client for sending results
-    publisherClient = createClient({ url: env.REDIS_URL });
+    publisherClient = createClient(clientOptions);
+    
     publisherClient.on('error', (err) => {
       logger.error('Redis Publisher Error', { error: err.message });
     });
+
+    publisherClient.on('connect', () => {
+      logger.info('Redis publisher connected');
+    });
+
+    publisherClient.on('reconnecting', () => {
+      logger.warn('Redis publisher reconnecting');
+    });
+
+    publisherClient.on('ready', () => {
+      logger.info('Redis publisher ready');
+    });
+
     await publisherClient.connect();
 
     logger.info('Job queue worker initialized');
